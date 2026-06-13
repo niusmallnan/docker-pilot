@@ -15,6 +15,7 @@ all: build
 deps:
 	go mod download
 	go mod verify
+	go mod tidy
 
 # Get version from git tag or use Dev
 GIT_VERSION := $(shell git describe --tags --exact-match 2>/dev/null || echo "Dev")
