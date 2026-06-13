@@ -1,7 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"io"
+	"os"
+	"strings"
 	"testing"
+
+	dbTypes "github.com/aquasecurity/trivy-db/pkg/types"
+	"github.com/aquasecurity/trivy/pkg/types"
 )
 
 func TestAnalyzeContainers(t *testing.T) {
@@ -254,4 +261,267 @@ func TestStoppedContainerWithRestartPolicy(t *testing.T) {
 	if len(reports[0].Suggestions) == 0 {
 		t.Error("expected suggestions for critical container")
 	}
+}
+
+func captureStdout(f func()) string {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	f()
+	w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	return buf.String()
+}
+
+func TestPrintHealthReport(t *testing.T) {
+	t.Run("healthy container", func(t *testing.T) {
+		reports := []ContainerHealth{
+			{
+				Container: ContainerInfo{
+					Name: "nginx",
+					Config: struct{ Image string }{
+						Image: "nginx:1.21",
+					},
+					State: struct {
+						Status       string
+						Running      bool
+						RestartCount int    `json:"RestartCount"`
+						StartedAt    string `json:"StartedAt"`
+					}{
+						Status: "running",
+					},
+				},
+				Status: "healthy",
+			},
+		}
+		output := captureStdout(func() { printHealthReport(reports) })
+		if !strings.Contains(output, "Healthy: 1") {
+			t.Error("expected 'Healthy: 1' in output, got:", output)
+		}
+	})
+
+	t.Run("warning container", func(t *testing.T) {
+		reports := []ContainerHealth{
+			{
+				Container: ContainerInfo{
+					Name: "unstable-app",
+					Config: struct{ Image string }{
+						Image: "app:latest",
+					},
+					State: struct {
+						Status       string
+						Running      bool
+						RestartCount int    `json:"RestartCount"`
+						StartedAt    string `json:"StartedAt"`
+					}{
+						Status: "running",
+					},
+				},
+				Status: "warning",
+				Issues: []string{"High restart count: 10"},
+			},
+		}
+		output := captureStdout(func() { printHealthReport(reports) })
+		if !strings.Contains(output, "Warning: 1") {
+			t.Error("expected 'Warning: 1' in output, got:", output)
+		}
+		if !strings.Contains(output, "WARNING") {
+			t.Error("expected 'WARNING' status in output")
+		}
+	})
+
+	t.Run("critical container", func(t *testing.T) {
+		reports := []ContainerHealth{
+			{
+				Container: ContainerInfo{
+					Name: "crashed-app",
+					Config: struct{ Image string }{
+						Image: "app:v1",
+					},
+					State: struct {
+						Status       string
+						Running      bool
+						RestartCount int    `json:"RestartCount"`
+						StartedAt    string `json:"StartedAt"`
+					}{
+						Status: "exited",
+					},
+				},
+				Status: "critical",
+				Issues: []string{"Container is not running"},
+				Suggestions: []string{
+					"Check logs: `docker logs crashed-app`",
+				},
+			},
+		}
+		output := captureStdout(func() { printHealthReport(reports) })
+		if !strings.Contains(output, "Critical: 1") {
+			t.Error("expected 'Critical: 1' in output, got:", output)
+		}
+		if !strings.Contains(output, "CRITICAL") {
+			t.Error("expected 'CRITICAL' status in output")
+		}
+	})
+
+	t.Run("mixed statuses", func(t *testing.T) {
+		reports := []ContainerHealth{
+			{
+				Container: ContainerInfo{
+					Name:   "nginx",
+					Config: struct{ Image string }{Image: "nginx:1.21"},
+					State: struct {
+						Status       string
+						Running      bool
+						RestartCount int    `json:"RestartCount"`
+						StartedAt    string `json:"StartedAt"`
+					}{Status: "running"},
+				},
+				Status: "healthy",
+			},
+			{
+				Container: ContainerInfo{
+					Name:   "api",
+					Config: struct{ Image string }{Image: "api:latest"},
+					State: struct {
+						Status       string
+						Running      bool
+						RestartCount int    `json:"RestartCount"`
+						StartedAt    string `json:"StartedAt"`
+					}{Status: "running"},
+				},
+				Status:      "warning",
+				Issues:      []string{"Using 'latest' tag"},
+				Suggestions: []string{"Use specific version tags"},
+			},
+		}
+		output := captureStdout(func() { printHealthReport(reports) })
+		if !strings.Contains(output, "Healthy: 1") {
+			t.Error("expected 'Healthy: 1' in output")
+		}
+		if !strings.Contains(output, "Warning: 1") {
+			t.Error("expected 'Warning: 1' in output")
+		}
+		if !strings.Contains(output, "2 containers analyzed") {
+			t.Error("expected '2 containers analyzed' in output")
+		}
+	})
+
+	t.Run("empty reports", func(t *testing.T) {
+		output := captureStdout(func() { printHealthReport(nil) })
+		if !strings.Contains(output, "0 containers analyzed") {
+			t.Error("expected '0 containers analyzed' in output")
+		}
+	})
+}
+
+func TestPrintScanReport(t *testing.T) {
+	t.Run("report with vulnerabilities", func(t *testing.T) {
+		report := types.Report{
+			ArtifactName: "alpine:3.15",
+			Results: types.Results{
+				{
+					Target: "alpine:3.15 (alpine 3.15.4)",
+					Vulnerabilities: []types.DetectedVulnerability{
+						{
+							VulnerabilityID:  "CVE-2022-28391",
+							PkgName:          "busybox",
+							InstalledVersion: "1.34.1-r3",
+							FixedVersion:     "1.34.1-r4",
+							Vulnerability:    dbTypes.Vulnerability{Severity: "CRITICAL"},
+						},
+						{
+							VulnerabilityID:  "CVE-2022-37434",
+							PkgName:          "zlib",
+							InstalledVersion: "1.2.12-r0",
+							FixedVersion:     "1.2.12-r1",
+							Vulnerability:    dbTypes.Vulnerability{Severity: "HIGH"},
+						},
+						{
+							VulnerabilityID:  "CVE-2021-42374",
+							PkgName:          "busybox",
+							InstalledVersion: "1.34.1-r3",
+							FixedVersion:     "",
+							Vulnerability:    dbTypes.Vulnerability{Severity: "MEDIUM"},
+						},
+					},
+				},
+			},
+		}
+		output := captureStdout(func() { printScanReport(report) })
+		if !strings.Contains(output, "CVE-2022-28391") {
+			t.Error("expected CVE-2022-28391 (CRITICAL) in output")
+		}
+		if !strings.Contains(output, "CVE-2022-37434") {
+			t.Error("expected CVE-2022-37434 (HIGH) in output")
+		}
+		if strings.Contains(output, "CVE-2021-42374") {
+			t.Error("MEDIUM severity CVE should be filtered out")
+		}
+		if !strings.Contains(output, "CRITICAL") {
+			t.Error("expected CRITICAL severity label in output")
+		}
+		if !strings.Contains(output, "HIGH") {
+			t.Error("expected HIGH severity label in output")
+		}
+	})
+
+	t.Run("report with no vulnerabilities", func(t *testing.T) {
+		report := types.Report{
+			ArtifactName: "scratch:latest",
+			Results:      types.Results{},
+		}
+		output := captureStdout(func() { printScanReport(report) })
+		if strings.Contains(output, "CVE-") {
+			t.Error("expected no CVE references in empty report")
+		}
+	})
+
+	t.Run("result with empty vulnerability list", func(t *testing.T) {
+		report := types.Report{
+			ArtifactName: "alpine:latest",
+			Results: types.Results{
+				{
+					Target:          "alpine:latest",
+					Vulnerabilities: nil,
+				},
+			},
+		}
+		output := captureStdout(func() { printScanReport(report) })
+		if strings.Contains(output, "Target:") {
+			t.Error("expected no target output for result with no vulns")
+		}
+	})
+
+	t.Run("multiple results", func(t *testing.T) {
+		report := types.Report{
+			ArtifactName: "ubuntu:22.04",
+			Results: types.Results{
+				{
+					Target: "ubuntu:22.04",
+					Vulnerabilities: []types.DetectedVulnerability{
+						{
+							VulnerabilityID:  "CVE-2023-0001",
+							Vulnerability:    dbTypes.Vulnerability{Severity: "HIGH"},
+							PkgName:          "openssl",
+							InstalledVersion: "3.0.2",
+							FixedVersion:     "3.0.3",
+						},
+					},
+				},
+				{
+					Target:          "node_modules",
+					Vulnerabilities: nil,
+				},
+			},
+		}
+		output := captureStdout(func() { printScanReport(report) })
+		if !strings.Contains(output, "CVE-2023-0001") {
+			t.Error("expected CVE-2023-0001 in output")
+		}
+		if !strings.Contains(output, "HIGH") {
+			t.Error("expected HIGH severity in output")
+		}
+	})
 }
