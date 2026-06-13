@@ -2,8 +2,9 @@
 
 ## Build
 
-- `make build` runs: `deps` → `ref-embed` (downloads lazydocker + trivy into `cmd/embed/`) → cross-compiles to `bin/docker-pilot` (CGO_ENABLED=0 GOOS=linux GOARCH=amd64).
-- `cmd/embed/` is gitignored. First build after clone downloads ~100MB of binaries, compressed with upx. Requires `curl` and `upx`.
+- `make build` runs: `deps` → `ref-embed` (downloads lazydocker into `cmd/embed/`) → cross-compiles to `bin/docker-pilot` (GOEXPERIMENT=jsonv2 CGO_ENABLED=0 GOOS=linux GOARCH=amd64).
+- `cmd/embed/` is gitignored. First build after clone downloads lazydocker (~20MB, compressed with upx). Requires `curl` and `upx`.
+- `GOEXPERIMENT=jsonv2` is required because trivy depends on Go 1.26+ jsonv2 packages.
 - `make test` runs `go test -v ./internal/...` only. Tests in `cmd/main_test.go` are **not** included.
 - To force re-download embedded binaries: `FORCE_REDOWNLOAD=true make ref-embed`.
 - Version is injected via ldflags: `-X main.version=$(git describe --tags --exact-match || echo "Dev")`.
@@ -16,7 +17,7 @@
   - `internal/ui` — legacy survey-based helpers. Some `internal/config` Ask* functions still use survey but are NOT called by the main flow.
 - `cmd/main.go` defines `rootCmd`, `configCmd`, `scanCmd`, `aiInspectCmd`. `cmd/tui.go` defines `tuiCmd`. Both files have `init()` functions that register commands on `rootCmd` — be aware when adding commands.
 - `config` command flow: Bubble Tea TUI → collect choices in `tui.ConfigModel` → `runConfig()` in `cmd/main.go` reads choices and calls `internal/config` writers + `internal/system` for daemon-reload/restart.
-- `scan` command: extracts embedded trivy to a temp dir, runs `trivy image --scanners vuln --severity CRITICAL,HIGH` on each local Docker image. Set `DOCKER_PILOT_VERBOSE_TRIVY=1` to see full Trivy output (quiet by default).
+- `scan` command: uses trivy as a Go library (`github.com/aquasecurity/trivy v0.71.0`) to scan Docker images via `artifact.Runner.ScanImage`. Filters to CRITICAL,HIGH severity and outputs table format. Set `DOCKER_PILOT_VERBOSE_TRIVY=1` to disable quiet mode.
 - **Trivy knowledge**: Use deepwiki (`deepwiki_ask_question` on `aquasecurity/trivy`) to look up Trivy CLI flags, scanning modes, DB paths, or other details before writing scan-related code.
 - **Trivy cache**: Trivy downloads vulnerability databases (from `ghcr.io/aquasecurity`) to `~/.cache/trivy` (Linux) or `~/Library/Caches/trivy` (macOS). First scan is slow while the DB downloads. Mount this cache when running in containers to avoid repeated downloads. The DB repo can be overridden via `--db-repository` if air-gapped.
 

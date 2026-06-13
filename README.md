@@ -80,7 +80,7 @@ sudo ./docker-pilot ai-inspect
 ### Build
 
 ```bash
-# Build (automatically downloads embedded binaries if missing)
+# Build (automatically downloads embedded lazydocker if missing)
 make build
 
 # Build and compress
@@ -89,7 +89,7 @@ make compress
 # Run tests
 make test
 
-# Refresh embedded binaries manually (if needed)
+# Refresh embedded lazydocker manually (if needed)
 make ref-embed
 
 # Tab completion should work automatically in most shells (zsh/bash)
@@ -124,7 +124,7 @@ docker-pilot/
 ├── cmd/
 │   ├── main.go          # Program entry, commands: config/scan/ai-inspect
 │   ├── tui.go           # LazyDocker TUI command
-│   └── embed/           # Embedded binaries (lazydocker, trivy, etc.)
+│   └── embed/           # Embedded lazydocker binary
 ├── internal/
 │   ├── install/         # Docker installation logic
 │   ├── config/          # Configuration handling (Registry/Proxy/CIDR)

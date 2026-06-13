@@ -22,8 +22,8 @@ GIT_VERSION := $(shell git describe --tags --exact-match 2>/dev/null || echo "De
 # Build static binary
 build: deps ref-embed
 	@mkdir -p bin
-	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) go build \
-		-ldflags="-s -w -X main.version=$(GIT_VERSION)" \
+	GOEXPERIMENT=jsonv2 CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) go build \
+		-ldflags="-s -w -extldflags '-static' -X main.version=$(GIT_VERSION)" \
 		-o $(BINARY_PATH) \
 		./cmd/...
 	@echo "Build complete: $(BINARY_PATH) (version: $(GIT_VERSION))"
@@ -36,7 +36,7 @@ compress: build
 
 # Run tests
 test:
-	go test -v ./internal/...
+	GOEXPERIMENT=jsonv2 go test -v ./internal/...
 
 # Clean build artifacts
 clean:
@@ -48,7 +48,7 @@ release: compress
 	tar -czvf $(BINARY_NAME)-$(GOOS)-$(GOARCH).tar.gz -C bin $(BINARY_NAME)
 	@echo "Release package created: $(BINARY_NAME)-$(GOOS)-$(GOARCH).tar.gz"
 
-# Download and embed lazydocker (Linux amd64)
+# Download and embed lazydocker
 ref-embed:
 	./scripts/ref-embed.sh
 
@@ -68,7 +68,7 @@ help:
 	@echo "  test            - Run tests"
 	@echo "  clean           - Clean build artifacts"
 	@echo "  release         - Build release package"
-	@echo "  ref-embed       - Refresh embedded binaries (lazydocker, etc.)"
+	@echo "  ref-embed       - Refresh embedded lazydocker binary"
 	@echo "  test-container  - Build and test in container with docker.sock mounted"
 	@echo "  help            - Show this help"
 

@@ -1,13 +1,13 @@
 package main
 
 import (
-	"embed"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
+	"time"
 
 	"docker-pilot/internal/config"
 	"docker-pilot/internal/install"
@@ -15,12 +15,13 @@ import (
 	"docker-pilot/internal/tui"
 	"docker-pilot/internal/ui"
 
+	dbTypes "github.com/aquasecurity/trivy-db/pkg/types"
+	"github.com/aquasecurity/trivy/pkg/commands/artifact"
+	"github.com/aquasecurity/trivy/pkg/flag"
+	"github.com/aquasecurity/trivy/pkg/types"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
-
-//go:embed embed/trivy
-var trivyFS embed.FS
 
 var version = "Dev"
 
@@ -211,7 +212,6 @@ func runConfig(cmd *cobra.Command, args []string) {
 func runScan(cmd *cobra.Command, args []string) {
 	ui.PrintBanner(version)
 
-	// Check if docker is available
 	if _, err := exec.LookPath("docker"); err != nil {
 		ui.PrintError("Docker not found on system - cannot scan")
 		os.Exit(1)
@@ -221,8 +221,7 @@ func runScan(cmd *cobra.Command, args []string) {
 	ui.PrintInfo("This may take a few minutes on first run (Trivy needs to download vulnerability database)")
 	ui.PrintInfo("")
 
-	// Extract and run embedded trivy
-	if err := runEmbeddedTrivy(); err != nil {
+	if err := runTrivyScan(); err != nil {
 		ui.PrintError("Scan failed: %v", err)
 		os.Exit(1)
 	}
@@ -251,7 +250,6 @@ func getDockerImages() ([]ImageInfo, error) {
 					Name: parts[1],
 				})
 			} else {
-				// Fallback: use the whole line as ID if parsing fails
 				images = append(images, ImageInfo{
 					ID:   line,
 					Name: line,
@@ -262,55 +260,66 @@ func getDockerImages() ([]ImageInfo, error) {
 	return images, nil
 }
 
-func runEmbeddedTrivy() error {
-	// Read embedded binary
-	data, err := trivyFS.ReadFile("embed/trivy")
-	if err != nil {
-		return err
-	}
-
-	// Write to temp file
-	tmpDir, err := os.MkdirTemp("", "trivy-*")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tmpDir)
-
-	tmpPath := filepath.Join(tmpDir, "trivy")
-	if err := os.WriteFile(tmpPath, data, 0755); err != nil {
-		return err
-	}
-
-	// Run trivy - scan Docker images
-	ui.PrintStep(1, 1, "Scanning Docker images")
-	// Get all image info
+func runTrivyScan() error {
 	images, err := getDockerImages()
 	if err != nil || len(images) == 0 {
 		ui.PrintWarning("No images to scan or failed to list images")
-	} else {
-		// Build Trivy args
-		args := []string{"image", "--scanners", "vuln", "--severity", "CRITICAL,HIGH", "--format", "table", "--no-progress"}
-		// Check if verbose mode is enabled
-		if os.Getenv("DOCKER_PILOT_VERBOSE_TRIVY") != "1" {
-			args = append(args, "--quiet")
-		}
-		// Scan each image
-		for _, image := range images {
-			// Print highlight header for this image
-			fmt.Println()
-			fmt.Println("═══════════════════════════════════════════════════════════════════")
-			fmt.Printf("  SCANNING IMAGE: %s\n", image.Name)
-			fmt.Printf("  IMAGE ID:     %s\n", image.ID)
-			fmt.Println("═══════════════════════════════════════════════════════════════════")
-			fmt.Println()
+		return nil
+	}
 
-			cmd := exec.Command(tmpPath, append(args, image.ID)...)
-			cmd.Stdin = os.Stdin
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
-				ui.PrintWarning(fmt.Sprintf("Image scan for %s completed with some warnings", image.Name))
-			}
+	ui.PrintStep(1, 1, "Scanning Docker images")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	opts := flag.Options{
+		GlobalOptions: flag.GlobalOptions{
+			Quiet: os.Getenv("DOCKER_PILOT_VERBOSE_TRIVY") != "1",
+		},
+		ScanOptions: flag.ScanOptions{
+			Scanners: types.Scanners{types.VulnerabilityScanner},
+		},
+		ReportOptions: flag.ReportOptions{
+			Format: types.FormatTable,
+			Severities: []dbTypes.Severity{
+				dbTypes.SeverityCritical,
+				dbTypes.SeverityHigh,
+			},
+		},
+	}
+	opts.SetOutputWriter(os.Stdout)
+
+	runner, err := artifact.NewRunner(ctx, opts, artifact.TargetContainerImage)
+	if err != nil {
+		return fmt.Errorf("failed to initialize Trivy runner: %w", err)
+	}
+	defer runner.Close(ctx)
+
+	for _, image := range images {
+		fmt.Println()
+		fmt.Println("═══════════════════════════════════════════════════════════════════")
+		fmt.Printf("  SCANNING IMAGE: %s\n", image.Name)
+		fmt.Printf("  IMAGE ID:     %s\n", image.ID)
+		fmt.Println("═══════════════════════════════════════════════════════════════════")
+		fmt.Println()
+
+		scanOpts := opts
+		scanOpts.ScanOptions.Target = image.Name
+
+		report, scanErr := runner.ScanImage(ctx, scanOpts)
+		if scanErr != nil {
+			ui.PrintWarning("Image scan for %s completed with warnings: %v", image.Name, scanErr)
+			continue
+		}
+
+		filteredReport, filterErr := runner.Filter(ctx, scanOpts, report)
+		if filterErr != nil {
+			ui.PrintWarning("Failed to filter results for %s: %v", image.Name, filterErr)
+			continue
+		}
+
+		if reportErr := runner.Report(ctx, scanOpts, filteredReport); reportErr != nil {
+			ui.PrintWarning("Failed to report results for %s: %v", image.Name, reportErr)
 		}
 	}
 
