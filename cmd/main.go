@@ -41,10 +41,14 @@ var configCmd = &cobra.Command{
 }
 
 var scanCmd = &cobra.Command{
-	Use:   "scan",
+	Use:   "scan [image]",
 	Short: "Scan Docker images for CVE vulnerabilities",
-	Long:  `Scan all Docker images on the host for known CVE vulnerabilities.`,
-	Run:   runScan,
+	Long: `Scan all Docker images on the host for known CVE vulnerabilities.
+
+Optionally specify an image name, tag, or ID to scan a single image:
+  docker-pilot scan nginx:latest
+  docker-pilot scan 6e36b47bab7d`,
+	Run: runScan,
 }
 
 var scanForceDBRefresh bool
@@ -222,7 +226,7 @@ func runScan(cmd *cobra.Command, args []string) {
 	ui.PrintInfo("This may take a few minutes on first run (Trivy needs to download vulnerability database)")
 	ui.PrintInfo("")
 
-	if err := runTrivyScan(); err != nil {
+	if err := runTrivyScan(args); err != nil {
 		ui.PrintError("Scan failed: %v", err)
 		os.Exit(1)
 	}
@@ -261,9 +265,26 @@ func getDockerImages() ([]ImageInfo, error) {
 	return images, nil
 }
 
-func runTrivyScan() error {
+func runTrivyScan(args []string) error {
 	images, err := getDockerImages()
-	if err != nil || len(images) == 0 {
+	if err != nil {
+		return fmt.Errorf("failed to list images: %w", err)
+	}
+
+	if len(args) > 0 {
+		filtered := make([]ImageInfo, 0, 1)
+		for _, img := range images {
+			for _, arg := range args {
+				if img.ID == arg || img.Name == arg || strings.HasPrefix(img.ID, arg) {
+					filtered = append(filtered, img)
+					break
+				}
+			}
+		}
+		images = filtered
+	}
+
+	if len(images) == 0 {
 		ui.PrintWarning("No images to scan or failed to list images")
 		return nil
 	}
