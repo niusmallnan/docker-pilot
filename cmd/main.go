@@ -295,6 +295,10 @@ func runTrivyScan() error {
 			continue
 		}
 
+		if os.Getenv("DOCKER_PILOT_DEBUG_SCAN") == "1" {
+			dumpReport(report)
+		}
+
 		printScanReport(report)
 	}
 
@@ -302,7 +306,50 @@ func runTrivyScan() error {
 	return nil
 }
 
+func dumpReport(report types.Report) {
+	fmt.Println("=== DEBUG: scan report dump ===")
+	fmt.Printf("ArtifactName: %s\n", report.ArtifactName)
+	fmt.Printf("Results count: %d\n", len(report.Results))
+	for i, r := range report.Results {
+		fmt.Printf("  Result[%d]: Target=%q, Class=%q, Type=%q\n", i, r.Target, r.Class, r.Type)
+		fmt.Printf("    Vulns count: %d\n", len(r.Vulnerabilities))
+		fmt.Printf("    Packages count: %d\n", len(r.Packages))
+		for j, v := range r.Vulnerabilities {
+			fmt.Printf("    Vuln[%d]: ID=%s Pkg=%s Installed=%s Fixed=%s Severity=%q Status=%d\n",
+				j, v.VulnerabilityID, v.PkgName, v.InstalledVersion, v.FixedVersion, v.Severity, v.Status)
+		}
+	}
+	fmt.Println("=== END debug dump ===")
+}
+
 func printScanReport(report types.Report) {
+	total := 0
+	critical := 0
+	high := 0
+
+	for _, result := range report.Results {
+		for _, v := range result.Vulnerabilities {
+			total++
+			switch v.Severity {
+			case "CRITICAL":
+				critical++
+			case "HIGH":
+				high++
+			}
+		}
+	}
+
+	if total == 0 {
+		ui.PrintSuccess("No vulnerabilities found")
+		return
+	}
+
+	fmt.Printf("Total: %d vulnerabilities", total)
+	if critical > 0 || high > 0 {
+		fmt.Printf(" (CRITICAL: %d, HIGH: %d)", critical, high)
+	}
+	fmt.Println()
+
 	for _, result := range report.Results {
 		var vulns []types.DetectedVulnerability
 		for _, v := range result.Vulnerabilities {
@@ -313,13 +360,13 @@ func printScanReport(report types.Report) {
 		if len(vulns) == 0 {
 			continue
 		}
-		fmt.Printf("Target: %s\n", result.Target)
+		fmt.Printf("  Target: %s\n", result.Target)
 		for _, v := range vulns {
-			fmt.Printf("  [%s] %s (installed: %s, fixed: %s)\n",
-				v.Severity, v.VulnerabilityID, v.InstalledVersion, v.FixedVersion)
+			fmt.Printf("    [%s] %s  %s  (installed: %s, fixed: %s)\n",
+				v.Severity, v.VulnerabilityID, v.PkgName, v.InstalledVersion, v.FixedVersion)
 		}
-		fmt.Println()
 	}
+	fmt.Println()
 }
 
 // ContainerInfo represents Docker container inspection data

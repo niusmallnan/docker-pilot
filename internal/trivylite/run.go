@@ -6,7 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	dbTypes "github.com/aquasecurity/trivy-db/pkg/db"
+	dbCfg "github.com/aquasecurity/trivy-db/pkg/db"
+	dbTypes "github.com/aquasecurity/trivy-db/pkg/types"
 	"github.com/aquasecurity/trivy/pkg/cache"
 	"github.com/aquasecurity/trivy/pkg/commands/operation"
 	trivyDB "github.com/aquasecurity/trivy/pkg/db"
@@ -15,6 +16,7 @@ import (
 	artimage "github.com/aquasecurity/trivy/pkg/fanal/artifact/image"
 	"github.com/aquasecurity/trivy/pkg/fanal/image"
 	ftypes "github.com/aquasecurity/trivy/pkg/fanal/types"
+	"github.com/aquasecurity/trivy/pkg/log"
 	"github.com/aquasecurity/trivy/pkg/scan"
 	"github.com/aquasecurity/trivy/pkg/scan/langpkg"
 	"github.com/aquasecurity/trivy/pkg/scan/ospkg"
@@ -38,6 +40,9 @@ func New(forceRefresh bool) (*Scanner, error) {
 	cd := cacheDir()
 	dbDir := trivyDB.Dir(cd)
 
+	verb := os.Getenv("DOCKER_PILOT_VERBOSE_TRIVY") == "1"
+	log.InitLogger(verb, !verb)
+
 	ctx := context.Background()
 	skipUpdate := !forceRefresh
 
@@ -55,6 +60,14 @@ func New(forceRefresh bool) (*Scanner, error) {
 		return nil, fmt.Errorf("failed to init vulnerability database: %w", err)
 	}
 
+	// Clear stale fanal cache to force re-analysis of image layers.
+	// The cache keys depend on registered analyzers, and our minimal
+	// analyzer set differs from standalone trivy.
+	fanalDir := filepath.Join(cd, "fanal")
+	if err := os.RemoveAll(fanalDir); err != nil {
+		return nil, fmt.Errorf("failed to clear fanal cache %s: %w", fanalDir, err)
+	}
+
 	c, closeFn, err := cache.New(cache.Options{CacheDir: cd})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize cache: %w", err)
@@ -63,7 +76,7 @@ func New(forceRefresh bool) (*Scanner, error) {
 	app := applier.NewApplier(c)
 	osScanner := ospkg.NewScanner()
 	langScanner := langpkg.NewScanner()
-	vulnClient := vulnerability.NewClient(dbTypes.Config{})
+	vulnClient := vulnerability.NewClient(dbCfg.Config{})
 
 	return &Scanner{
 		cache:   c,
@@ -74,15 +87,19 @@ func New(forceRefresh bool) (*Scanner, error) {
 
 // ScanImage scans a single container image for vulnerabilities.
 func (s *Scanner) ScanImage(ctx context.Context, imageRef string, quiet bool) (types.Report, error) {
-	img, cleanup, err := image.NewContainerImage(ctx, imageRef, ftypes.ImageOptions{})
+	img, cleanup, err := image.NewContainerImage(ctx, imageRef, ftypes.ImageOptions{
+		ImageSources: ftypes.ImageSources{ftypes.DockerImageSource},
+	})
 	if err != nil {
 		return types.Report{}, fmt.Errorf("failed to open image %s: %w", imageRef, err)
 	}
 	defer cleanup()
 
 	art, err := artimage.NewArtifact(img, s.cache, artifact.Option{
-		NoProgress:  quiet,
-		ImageOption: ftypes.ImageOptions{},
+		NoProgress: quiet,
+		ImageOption: ftypes.ImageOptions{
+			ImageSources: ftypes.ImageSources{ftypes.DockerImageSource},
+		},
 	})
 	if err != nil {
 		return types.Report{}, fmt.Errorf("failed to create artifact: %w", err)
@@ -90,8 +107,10 @@ func (s *Scanner) ScanImage(ctx context.Context, imageRef string, quiet bool) (t
 
 	scanSvc := scan.NewService(s.svc, art)
 	return scanSvc.ScanArtifact(ctx, types.ScanOptions{
-		Scanners: types.Scanners{types.VulnerabilityScanner},
-		PkgTypes: []string{"os", "library"},
+		Scanners:            types.Scanners{types.VulnerabilityScanner},
+		PkgTypes:            []string{"os", "library"},
+		PkgRelationships:    ftypes.Relationships,
+		VulnSeveritySources: []dbTypes.SourceID{"auto"},
 	})
 }
 

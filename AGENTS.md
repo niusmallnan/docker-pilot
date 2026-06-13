@@ -17,10 +17,14 @@
   - `internal/ui` — legacy survey-based helpers. Some `internal/config` Ask* functions still use survey but are NOT called by the main flow.
 - `cmd/main.go` defines `rootCmd`, `configCmd`, `scanCmd`, `aiInspectCmd`. `cmd/tui.go` defines `tuiCmd`. Both files have `init()` functions that register commands on `rootCmd` — be aware when adding commands.
 - `config` command flow: Bubble Tea TUI → collect choices in `tui.ConfigModel` → `runConfig()` in `cmd/main.go` reads choices and calls `internal/config` writers + `internal/system` for daemon-reload/restart.
-- `scan` command: uses `internal/trivylite` (a minimal fork of trivy's scan pipeline) that registers only OS-level analyzers (apk, dpkg, rpm) and bypasses the full `pkg/commands/artifact` orchestration layer. Filters to CRITICAL,HIGH severity. Set `DOCKER_PILOT_VERBOSE_TRIVY=1` to disable quiet mode.
+- `scan` command: uses `internal/trivylite` (a minimal fork of trivy's scan pipeline) that registers only OS-level analyzers (apk, dpkg, rpm) and bypasses the full `pkg/commands/artifact` orchestration layer. Filters to CRITICAL,HIGH severity. Set `DOCKER_PILOT_VERBOSE_TRIVY=1` to see trivy internal logs.
+- `scan` command flags: `--ref-db` to force refresh vulnerability DB from `public.ecr.aws/aquasecurity/trivy-db:2`.
 - **Trivy knowledge**: Use deepwiki (`deepwiki_ask_question` on `aquasecurity/trivy`) to look up Trivy CLI flags, scanning modes, DB paths, or other details before writing scan-related code.
-- **Trivy cache**: Trivy downloads vulnerability databases (from `ghcr.io/aquasecurity`) to `~/.cache/trivy` (Linux) or `~/Library/Caches/trivy` (macOS). First scan is slow while the DB downloads. Mount this cache when running in containers to avoid repeated downloads. The DB repo can be overridden via `--db-repository` if air-gapped.
+- **Trivy cache**: Two caches at `~/.cache/trivy/`:
+  - `db/trivy.db` — vulnerability database (downloaded from ECR)
+  - `fanal/fanal.db` — image layer analysis cache (cleared on startup since our analyzer set differs from standalone trivy)
 - **`internal/trivylite/`**: A minimal fork of trivy's scan pipeline. `scanner.go` is a copy of `pkg/scan/local/service.go` with `analyzer/all` replaced by `minimal_analyzer.go` (OS-only analyzers). `run.go` replicates the cache→applier→scanner→artifact initialization chain from `artifact/run.go` without misconfig/secret/license/RPC/JavaDB/K8s scanning.
+- **Critical `ScanOptions` defaults**: When adding scan options, always set `PkgRelationships` (to `ftypes.Relationships`) and `VulnSeveritySources` (to `[]dbTypes.SourceID{"auto"}`) — missing these silently produces 0 results.
 
 ## CI / Formatting
 

@@ -42,6 +42,9 @@ sudo ./docker-pilot config
 ```bash
 # Scan containers and images for CVE vulnerabilities
 sudo ./docker-pilot scan
+
+# Force refresh vulnerability database
+sudo ./docker-pilot scan --ref-db
 ```
 
 ### AI Health Inspection
@@ -129,6 +132,8 @@ docker-pilot/
 │   ├── install/         # Docker installation logic
 │   ├── config/          # Configuration handling (Registry/Proxy/CIDR)
 │   ├── system/          # System checks, service management, utilities
+│   ├── tui/             # Bubble Tea interactive config wizard
+│   ├── trivylite/       # Minimal trivy scan pipeline (vulnerability-only)
 │   └── ui/              # Interactive UI, color output, forms
 ├── scripts/
 │   └── ref-embed.sh     # Script to refresh embedded binaries

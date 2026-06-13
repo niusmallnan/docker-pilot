@@ -54,7 +54,7 @@ ref-embed:
 
 # Test container - builds and runs in container with docker.sock mounted
 TRIVY_CACHE_DIR := $(if $(filter Darwin,$(shell uname -s)),$(HOME)/Library/Caches/trivy,$(HOME)/.cache/trivy)
-test-container: build
+test-container:
 	docker build -t docker-pilot-test .
 	docker run --rm -it -v /var/run/docker.sock:/var/run/docker.sock -v $(TRIVY_CACHE_DIR):/root/.cache/trivy docker-pilot-test
 
