@@ -22,7 +22,7 @@
 - **Trivy knowledge**: Use deepwiki (`deepwiki_ask_question` on `aquasecurity/trivy`) to look up Trivy CLI flags, scanning modes, DB paths, or other details before writing scan-related code.
 - **Trivy cache**: Two caches at `~/.cache/trivy/`:
   - `db/trivy.db` — vulnerability database (downloaded from ECR)
-  - `fanal/fanal.db` — image layer analysis cache (cleared on startup since our analyzer set differs from standalone trivy)
+  - `fanal/fanal.db` — image layer analysis cache (keys include analyzer versions; our analyzer set differs from standalone trivy, so no conflicts)
 - **`internal/trivylite/`**: A minimal fork of trivy's scan pipeline. `scanner.go` is a copy of `pkg/scan/local/service.go` with `analyzer/all` replaced by `minimal_analyzer.go` (OS-only analyzers). `run.go` replicates the cache→applier→scanner→artifact initialization chain from `artifact/run.go` without misconfig/secret/license/RPC/JavaDB/K8s scanning.
 - **Critical `ScanOptions` defaults**: When adding scan options, always set `PkgRelationships` (to `ftypes.Relationships`) and `VulnSeveritySources` (to `[]dbTypes.SourceID{"auto"}`) — missing these silently produces 0 results.
 

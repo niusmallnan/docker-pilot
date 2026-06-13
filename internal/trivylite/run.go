@@ -60,14 +60,6 @@ func New(forceRefresh bool) (*Scanner, error) {
 		return nil, fmt.Errorf("failed to init vulnerability database: %w", err)
 	}
 
-	// Clear stale fanal cache to force re-analysis of image layers.
-	// The cache keys depend on registered analyzers, and our minimal
-	// analyzer set differs from standalone trivy.
-	fanalDir := filepath.Join(cd, "fanal")
-	if err := os.RemoveAll(fanalDir); err != nil {
-		return nil, fmt.Errorf("failed to clear fanal cache %s: %w", fanalDir, err)
-	}
-
 	c, closeFn, err := cache.New(cache.Options{CacheDir: cd})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize cache: %w", err)
