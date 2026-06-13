@@ -47,6 +47,8 @@ var scanCmd = &cobra.Command{
 	Run:   runScan,
 }
 
+var scanForceDBRefresh bool
+
 var aiInspectCmd = &cobra.Command{
 	Use:   "ai-inspect",
 	Short: "AI-powered container health inspection",
@@ -55,6 +57,7 @@ var aiInspectCmd = &cobra.Command{
 }
 
 func init() {
+	scanCmd.Flags().BoolVar(&scanForceDBRefresh, "ref-db", false, "force refresh vulnerability database from public.ecr.aws/aquasecurity/trivy-db:2")
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(aiInspectCmd)
@@ -272,6 +275,12 @@ func runTrivyScan() error {
 
 	quiet := os.Getenv("DOCKER_PILOT_VERBOSE_TRIVY") != "1"
 
+	scanner, err := trivylite.New(scanForceDBRefresh)
+	if err != nil {
+		return fmt.Errorf("failed to initialize scanner: %w", err)
+	}
+	defer scanner.Close()
+
 	for _, image := range images {
 		fmt.Println()
 		fmt.Println("═══════════════════════════════════════════════════════════════════")
@@ -280,7 +289,7 @@ func runTrivyScan() error {
 		fmt.Println("═══════════════════════════════════════════════════════════════════")
 		fmt.Println()
 
-		report, scanErr := trivylite.ScanImage(ctx, image.Name, quiet)
+		report, scanErr := scanner.ScanImage(ctx, image.Name, quiet)
 		if scanErr != nil {
 			ui.PrintWarning("Image scan for %s completed with warnings: %v", image.Name, scanErr)
 			continue
