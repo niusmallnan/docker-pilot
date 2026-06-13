@@ -15,9 +15,7 @@ import (
 	"docker-pilot/internal/tui"
 	"docker-pilot/internal/ui"
 
-	dbTypes "github.com/aquasecurity/trivy-db/pkg/types"
-	"github.com/aquasecurity/trivy/pkg/commands/artifact"
-	"github.com/aquasecurity/trivy/pkg/flag"
+	"docker-pilot/internal/trivylite"
 	"github.com/aquasecurity/trivy/pkg/types"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -272,28 +270,7 @@ func runTrivyScan() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	opts := flag.Options{
-		GlobalOptions: flag.GlobalOptions{
-			Quiet: os.Getenv("DOCKER_PILOT_VERBOSE_TRIVY") != "1",
-		},
-		ScanOptions: flag.ScanOptions{
-			Scanners: types.Scanners{types.VulnerabilityScanner},
-		},
-		ReportOptions: flag.ReportOptions{
-			Format: types.FormatTable,
-			Severities: []dbTypes.Severity{
-				dbTypes.SeverityCritical,
-				dbTypes.SeverityHigh,
-			},
-		},
-	}
-	opts.SetOutputWriter(os.Stdout)
-
-	runner, err := artifact.NewRunner(ctx, opts, artifact.TargetContainerImage)
-	if err != nil {
-		return fmt.Errorf("failed to initialize Trivy runner: %w", err)
-	}
-	defer runner.Close(ctx)
+	quiet := os.Getenv("DOCKER_PILOT_VERBOSE_TRIVY") != "1"
 
 	for _, image := range images {
 		fmt.Println()
@@ -303,28 +280,37 @@ func runTrivyScan() error {
 		fmt.Println("═══════════════════════════════════════════════════════════════════")
 		fmt.Println()
 
-		scanOpts := opts
-		scanOpts.ScanOptions.Target = image.Name
-
-		report, scanErr := runner.ScanImage(ctx, scanOpts)
+		report, scanErr := trivylite.ScanImage(ctx, image.Name, quiet)
 		if scanErr != nil {
 			ui.PrintWarning("Image scan for %s completed with warnings: %v", image.Name, scanErr)
 			continue
 		}
 
-		filteredReport, filterErr := runner.Filter(ctx, scanOpts, report)
-		if filterErr != nil {
-			ui.PrintWarning("Failed to filter results for %s: %v", image.Name, filterErr)
-			continue
-		}
-
-		if reportErr := runner.Report(ctx, scanOpts, filteredReport); reportErr != nil {
-			ui.PrintWarning("Failed to report results for %s: %v", image.Name, reportErr)
-		}
+		printScanReport(report)
 	}
 
 	ui.PrintSuccess("\nScan complete!")
 	return nil
+}
+
+func printScanReport(report types.Report) {
+	for _, result := range report.Results {
+		var vulns []types.DetectedVulnerability
+		for _, v := range result.Vulnerabilities {
+			if v.Severity == "CRITICAL" || v.Severity == "HIGH" {
+				vulns = append(vulns, v)
+			}
+		}
+		if len(vulns) == 0 {
+			continue
+		}
+		fmt.Printf("Target: %s\n", result.Target)
+		for _, v := range vulns {
+			fmt.Printf("  [%s] %s (installed: %s, fixed: %s)\n",
+				v.Severity, v.VulnerabilityID, v.InstalledVersion, v.FixedVersion)
+		}
+		fmt.Println()
+	}
 }
 
 // ContainerInfo represents Docker container inspection data
