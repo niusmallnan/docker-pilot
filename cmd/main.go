@@ -234,8 +234,9 @@ func runScan(cmd *cobra.Command, args []string) {
 
 // ImageInfo holds Docker image information
 type ImageInfo struct {
-	ID   string
-	Name string
+	ID    string
+	Name  string
+	Names []string // all names/tags for this image ID (when deduped)
 }
 
 func getDockerImages() ([]ImageInfo, error) {
@@ -247,22 +248,54 @@ func getDockerImages() ([]ImageInfo, error) {
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	var images []ImageInfo
 	for _, line := range lines {
-		if line != "" {
-			parts := strings.SplitN(line, "|", 2)
-			if len(parts) == 2 {
-				images = append(images, ImageInfo{
-					ID:   parts[0],
-					Name: parts[1],
-				})
-			} else {
-				images = append(images, ImageInfo{
-					ID:   line,
-					Name: line,
-				})
-			}
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) == 2 {
+			images = append(images, ImageInfo{
+				ID:   parts[0],
+				Name: parts[1],
+			})
+		} else {
+			images = append(images, ImageInfo{
+				ID:   line,
+				Name: line,
+			})
 		}
 	}
 	return images, nil
+}
+
+func dedupImages(images []ImageInfo) []ImageInfo {
+	seen := make(map[string]*ImageInfo)
+	for i := range images {
+		img := &images[i]
+		if existing, ok := seen[img.ID]; ok {
+			existing.Names = append(existing.Names, img.Name)
+		} else {
+			img.Names = []string{img.Name}
+			seen[img.ID] = img
+		}
+	}
+	result := make([]ImageInfo, 0, len(seen))
+	for _, img := range seen {
+		result = append(result, *img)
+	}
+	return result
+}
+
+func filterImagesByArgs(images []ImageInfo, args []string) []ImageInfo {
+	filtered := make([]ImageInfo, 0, 1)
+	for _, img := range images {
+		for _, arg := range args {
+			if img.ID == arg || img.Name == arg || strings.HasPrefix(img.ID, arg) {
+				filtered = append(filtered, img)
+				break
+			}
+		}
+	}
+	return filtered
 }
 
 func runTrivyScan(args []string) error {
@@ -272,16 +305,9 @@ func runTrivyScan(args []string) error {
 	}
 
 	if len(args) > 0 {
-		filtered := make([]ImageInfo, 0, 1)
-		for _, img := range images {
-			for _, arg := range args {
-				if img.ID == arg || img.Name == arg || strings.HasPrefix(img.ID, arg) {
-					filtered = append(filtered, img)
-					break
-				}
-			}
-		}
-		images = filtered
+		images = filterImagesByArgs(images, args)
+	} else {
+		images = dedupImages(images)
 	}
 
 	if len(images) == 0 {
@@ -307,6 +333,11 @@ func runTrivyScan(args []string) error {
 		fmt.Println("═══════════════════════════════════════════════════════════════════")
 		fmt.Printf("  SCANNING IMAGE: %s\n", image.Name)
 		fmt.Printf("  IMAGE ID:     %s\n", image.ID)
+		if len(image.Names) > 1 {
+			for _, n := range image.Names[1:] {
+				fmt.Printf("                %s\n", n)
+			}
+		}
 		fmt.Println("═══════════════════════════════════════════════════════════════════")
 		fmt.Println()
 

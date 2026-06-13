@@ -525,3 +525,117 @@ func TestPrintScanReport(t *testing.T) {
 		}
 	})
 }
+
+func TestDedupImages(t *testing.T) {
+	t.Run("no duplicates", func(t *testing.T) {
+		images := []ImageInfo{
+			{ID: "abc", Name: "alpine:3.19"},
+			{ID: "def", Name: "nginx:1.25"},
+		}
+		result := dedupImages(images)
+		if len(result) != 2 {
+			t.Fatalf("expected 2 unique images, got %d", len(result))
+		}
+	})
+
+	t.Run("duplicate IDs merged", func(t *testing.T) {
+		images := []ImageInfo{
+			{ID: "abc", Name: "alpine:latest"},
+			{ID: "abc", Name: "alpine:3.19"},
+			{ID: "abc", Name: "my-alpine:prod"},
+		}
+		result := dedupImages(images)
+		if len(result) != 1 {
+			t.Fatalf("expected 1 unique image, got %d", len(result))
+		}
+		if len(result[0].Names) != 3 {
+			t.Fatalf("expected 3 names, got %d: %v", len(result[0].Names), result[0].Names)
+		}
+		if result[0].Name != "alpine:latest" {
+			t.Errorf("expected first name 'alpine:latest', got '%s'", result[0].Name)
+		}
+	})
+
+	t.Run("mixed duplicated and unique", func(t *testing.T) {
+		images := []ImageInfo{
+			{ID: "aaa", Name: "img-a:v1"},
+			{ID: "bbb", Name: "img-b:v1"},
+			{ID: "aaa", Name: "img-a:v2"},
+			{ID: "ccc", Name: "img-c:v1"},
+		}
+		result := dedupImages(images)
+		if len(result) != 3 {
+			t.Fatalf("expected 3 unique images, got %d", len(result))
+		}
+	})
+
+	t.Run("empty list", func(t *testing.T) {
+		result := dedupImages(nil)
+		if len(result) != 0 {
+			t.Fatalf("expected 0 images, got %d", len(result))
+		}
+	})
+
+	t.Run("single image", func(t *testing.T) {
+		images := []ImageInfo{
+			{ID: "xyz", Name: "busybox:1.36"},
+		}
+		result := dedupImages(images)
+		if len(result) != 1 {
+			t.Fatalf("expected 1 image, got %d", len(result))
+		}
+		if len(result[0].Names) != 1 {
+			t.Fatalf("expected 1 name, got %d", len(result[0].Names))
+		}
+	})
+}
+
+func TestImageArgFilter(t *testing.T) {
+	images := []ImageInfo{
+		{ID: "sha256:abc123", Name: "alpine:latest"},
+		{ID: "sha256:def456", Name: "nginx:1.25"},
+		{ID: "sha256:ghi789", Name: "busybox:1.36"},
+		{ID: "sha256:abc123", Name: "alpine:3.19"},
+	}
+
+	t.Run("filter by exact name", func(t *testing.T) {
+		filtered := filterImagesByArgs(images, []string{"nginx:1.25"})
+		if len(filtered) != 1 {
+			t.Fatalf("expected 1 match, got %d", len(filtered))
+		}
+		if filtered[0].Name != "nginx:1.25" {
+			t.Errorf("expected 'nginx:1.25', got '%s'", filtered[0].Name)
+		}
+	})
+
+	t.Run("filter by exact ID", func(t *testing.T) {
+		filtered := filterImagesByArgs(images, []string{"sha256:ghi789"})
+		if len(filtered) != 1 {
+			t.Fatalf("expected 1 match, got %d", len(filtered))
+		}
+		if filtered[0].Name != "busybox:1.36" {
+			t.Errorf("expected 'busybox:1.36', got '%s'", filtered[0].Name)
+		}
+	})
+
+	t.Run("filter by ID prefix", func(t *testing.T) {
+		filtered := filterImagesByArgs(images, []string{"sha256:abc"})
+		if len(filtered) != 2 {
+			t.Fatalf("expected 2 matches (both abc123), got %d", len(filtered))
+		}
+	})
+
+	t.Run("no match", func(t *testing.T) {
+		filtered := filterImagesByArgs(images, []string{"doesnotexist:latest"})
+		if len(filtered) != 0 {
+			t.Fatalf("expected 0 matches, got %d", len(filtered))
+		}
+	})
+
+	t.Run("multiple args", func(t *testing.T) {
+		filtered := filterImagesByArgs(images, []string{"alpine:latest", "busybox:1.36"})
+		if len(filtered) != 2 {
+			t.Fatalf("expected 2 matches, got %d", len(filtered))
+		}
+	})
+}
