@@ -25,7 +25,7 @@
 
 - CI (`.github/workflows/ci.yml`) checks `go fmt ./...` and `go mod tidy` with `git diff --exit-code`. Run both before pushing.
 - Go 1.26. `go vet` is not in CI but was previously fixed — keep it clean.
-- No linter config in repo. No pre-commit hook file found despite `.MEMORY.md` mentioning one.
+- No linter config in repo. No pre-commit hook file found.
 
 ## Testing in container
 
