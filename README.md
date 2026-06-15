@@ -20,10 +20,10 @@ Docker installation and TUI management tool, designed specifically for SLES 15+.
 
 ```bash
 # Run installation and configuration wizard (defaults to `config` command)
-sudo ./docker-pilot
+./docker-pilot
 
 # Or explicitly
-sudo ./docker-pilot config
+./docker-pilot config
 ```
 
 `config` command has two modes:
@@ -41,17 +41,17 @@ sudo ./docker-pilot config
 
 ```bash
 # Scan containers and images for CVE vulnerabilities
-sudo ./docker-pilot scan
+./docker-pilot scan
 
 # Force refresh vulnerability database
-sudo ./docker-pilot scan --ref-db
+./docker-pilot scan --ref-db
 ```
 
 ### AI Health Inspection
 
 ```bash
 # AI-powered analysis of container health status
-sudo ./docker-pilot ai-inspect
+./docker-pilot ai-inspect
 ```
 
 ### Help
@@ -145,7 +145,7 @@ docker-pilot/
 
 ## Important Notes
 
-- Must run with sudo for system modifications
+- Requires Docker socket access for container operations
 - SLES 15+ only
 - Docker service restarts automatically after configuration changes
 - Current user is automatically added to `docker` group
